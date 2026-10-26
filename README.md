@@ -3,7 +3,8 @@
 A browser-first live studio concept built with React, TypeScript, Vite, WebRTC, and WebSocket signaling. Responsive for desktop, tablet, and mobile browsers.
 
 ## MVP features
-- Responsive host/viewer studio and local camera/microphone controls.
+- Real browser camera and microphone capture with permission handling, local preview, mute/unmute, and device release controls.
+- WebRTC audio/video room for small test sessions (requires the signaling server to be deployed and reachable).
 - Room codes and WebRTC peer-to-peer audio/video for small test sessions.
 - WebSocket signaling server with room membership and SDP/ICE relay.
 - UI settings for Facebook Live, YouTube Live, Twitch, TikTok/Kick and custom RTMP/RTMPS destinations.
