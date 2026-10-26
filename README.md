@@ -41,3 +41,7 @@ Use browser capture → WebRTC/WHIP ingest → trusted media gateway → server-
 
 ## License
 MIT. See [LICENSE](LICENSE).
+
+## RTMP / Facebook / YouTube / Twitch
+
+A browser cannot publish RTMP directly. To relay a real camera stream to Facebook Live, YouTube Live, Twitch, or another RTMP destination, deploy a WebRTC/WHIP media gateway and a server-side RTMP relay. See [the RTMP setup guide](docs/RTMP-SETUP.md). GitHub Pages alone cannot run the relay or securely store stream keys.
