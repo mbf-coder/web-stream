@@ -34,10 +34,39 @@ export default function App() {
   };
   const connect=(nextRole:Role,code:string)=>{
     setStatus('Connecting to signaling server…');const ws=new WebSocket(wsUrl);socket.current=ws;
-    const timeout=window.setTimeout(()=>{if(ws.readyState!==WebSocket.OPEN){ws.close();setError(`Cannot connect to ${wsUrl}. Start the signaling server with npm run dev:server.`);setStatus('Unable to connect');}},7000);
+    const timeout = window.setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        setError(`Cannot connect to ${wsUrl}. The signaling server must be deployed and reachable.`);
+        setStatus('Unable to connect');
+        ws.close();
+        if (nextRole === 'host') {
+          stream.current?.getTracks().forEach(t => t.stop()); stream.current = null;
+          if (localVideo.current) localVideo.current.srcObject = null;
+          setPreviewReady(false); setLive(false); liveRef.current = false;
+        }
+      }
+    }, 7000);
     ws.onopen=()=>{clearTimeout(timeout);ws.send(JSON.stringify({type:'join',room:code,role:nextRole==='host'?'broadcast':'watch'}));setConnected(true);};
-    ws.onerror=()=>{clearTimeout(timeout);setError(`Could not connect to ${wsUrl}. Check that the signaling server is running.`);};
-    ws.onclose=()=>{setConnected(false);if(liveRef.current)setStatus('Connection closed');};
+    ws.onerror = () => {
+      clearTimeout(timeout);
+      setError(`Could not connect to ${wsUrl}. Deploy the WebSocket signaling server and set VITE_SIGNALING_URL to its wss:// address.`);
+      setStatus('Signaling connection failed');
+      if (nextRole === 'host') {
+        stream.current?.getTracks().forEach(t => t.stop()); stream.current = null;
+        if (localVideo.current) localVideo.current.srcObject = null;
+        setPreviewReady(false); setLive(false); liveRef.current = false;
+      }
+    };
+    ws.onclose = () => {
+      clearTimeout(timeout); setConnected(false);
+      if (liveRef.current) {
+        stream.current?.getTracks().forEach(t => t.stop()); stream.current = null;
+        if (localVideo.current) localVideo.current.srcObject = null;
+        closePeers(); setPreviewReady(false); setLive(false); liveRef.current = false;
+        setError('The signaling connection closed. Your camera and microphone have been released.');
+        setStatus('Stream disconnected');
+      }
+    };
     ws.onmessage=async ev=>{let m:any;try{m=JSON.parse(ev.data);}catch{return;}
       if(m.type==='joined'){selfId.current=m.id;setViewers((m.peers||[]).filter((p:any)=>p.role==='watch').length);setStatus(nextRole==='host'?'Connected — share the room code with viewers':'Connected — waiting for the host');if(nextRole==='host')for(const p of (m.peers||[]).filter((p:any)=>p.role==='watch'))await createPeer(p.id);}
       else if(m.type==='peer-joined'){if(nextRole==='host'){setViewers(n=>n+1);if(stream.current)await createPeer(m.id);}}
