@@ -6,7 +6,7 @@ const roomCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 
 export default function App() {
   const [role,setRole]=useState<Role>('host'); const [room,setRoom]=useState(roomCode); const [title,setTitle]=useState('My live stream');
-  const [live,setLive]=useState(false); const [connected,setConnected]=useState(false); const [camera,setCamera]=useState(true); const [mic,setMic]=useState(true);
+  const [live,setLive]=useState(false); const [previewReady,setPreviewReady]=useState(false); const [busy,setBusy]=useState(false); const [connected,setConnected]=useState(false); const [camera,setCamera]=useState(true); const [mic,setMic]=useState(true);
   const [status,setStatus]=useState('Ready to set up your stream'); const [error,setError]=useState(''); const [viewers,setViewers]=useState(0); const [copied,setCopied]=useState(false);
   const [showDestinations,setShowDestinations]=useState(false); const [rtmpName,setRtmpName]=useState('My RTMP destination'); const [rtmpUrl,setRtmpUrl]=useState(''); const [rtmpKey,setRtmpKey]=useState(''); const [destinations,setDestinations]=useState<string[]>([]); const [destinationNotice,setDestinationNotice]=useState('');
   const localVideo=useRef<HTMLVideoElement>(null); const remoteVideo=useRef<HTMLVideoElement>(null); const stream=useRef<MediaStream|null>(null); const socket=useRef<WebSocket|null>(null);
@@ -49,9 +49,57 @@ export default function App() {
       else if(m.type==='error'){setError(m.message||'Signaling error');setStatus('Unable to connect');}
     };
   };
-  const startHost=async()=>{try{setError('');if(!title.trim())throw Error('Add a title for your stream.');const media=await navigator.mediaDevices.getUserMedia({video:camera?{width:{ideal:1280},height:{ideal:720}}:false,audio:mic});stream.current=media;if(localVideo.current)localVideo.current.srcObject=media;connect('host',room.toUpperCase());setLive(true);liveRef.current=true;setStatus('Starting stream…');}catch(e){setError(e instanceof Error?e.message:'Could not access camera or microphone.');setStatus('Unable to start');}};
+  const getMediaError = (e: unknown) => {
+    if (e instanceof DOMException && e.name === 'NotAllowedError') return 'Camera/microphone permission was denied. Allow access in your browser settings and try again.';
+    if (e instanceof DOMException && e.name === 'NotFoundError') return 'No camera or microphone was found. Connect a device or enable one in system settings.';
+    if (e instanceof DOMException && e.name === 'NotReadableError') return 'Camera or microphone is already in use by another app. Close it and try again.';
+    if (!navigator.mediaDevices?.getUserMedia) return 'Camera access requires HTTPS (or localhost) and a browser that supports media capture.';
+    return e instanceof Error ? e.message : 'Could not access camera or microphone.';
+  };
+  const startPreview = async () => {
+    try {
+      setError(''); setBusy(true); setStatus('Requesting camera and microphone permission…');
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access requires HTTPS (or localhost). Open this site over HTTPS and try again.');
+      const media = await navigator.mediaDevices.getUserMedia({
+        video: camera ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false,
+        audio: mic ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false
+      });
+      stream.current?.getTracks().forEach(t => t.stop());
+      stream.current = media;
+      if (localVideo.current) { localVideo.current.srcObject = media; await localVideo.current.play().catch(() => {}); }
+      setPreviewReady(true); setStatus('Camera and microphone ready'); 
+    } catch (e) { setError(getMediaError(e)); setStatus('Device setup failed'); }
+    finally { setBusy(false); }
+  };
+  const startHost = async () => {
+    try {
+      setError('');
+      if (!title.trim()) throw new Error('Add a title for your stream.');
+      if (!room.trim()) throw new Error('Enter a room code.');
+      if (!stream.current) await startPreview();
+      if (!stream.current) return;
+      const tracks = stream.current.getTracks();
+      if (!tracks.some(t => t.enabled && t.readyState === 'live')) throw new Error('Turn on the camera or microphone before going live.');
+      setBusy(true); connect('host', room.toUpperCase()); setLive(true); liveRef.current = true; setStatus('Starting stream…');
+    } catch (e) { setError(getMediaError(e)); setStatus('Unable to start'); }
+    finally { setBusy(false); }
+  };
   const joinViewer=()=>{setError('');if(!room.trim()){setError('Enter a room code.');return;}connect('viewer',room.toUpperCase());};
-  const stop=()=>{send({type:'stream-ended'});closePeers();stream.current?.getTracks().forEach(t=>t.stop());stream.current=null;if(localVideo.current)localVideo.current.srcObject=null;if(remoteVideo.current)remoteVideo.current.srcObject=null;socket.current?.close();socket.current=null;setConnected(false);setLive(false);liveRef.current=false;setStatus('Stream stopped');};
+  const stop = () => {
+    send({ type: 'stream-ended' }); closePeers();
+    stream.current?.getTracks().forEach(t => t.stop()); stream.current = null;
+    if (localVideo.current) localVideo.current.srcObject = null;
+    if (remoteVideo.current) remoteVideo.current.srcObject = null;
+    socket.current?.close(); socket.current = null;
+    setConnected(false); setLive(false); setPreviewReady(false); liveRef.current = false;
+    setStatus('Stream stopped'); setError('');
+  };
+  const stopPreview = () => {
+    if (connected || live) return;
+    stream.current?.getTracks().forEach(t => t.stop()); stream.current = null;
+    if (localVideo.current) localVideo.current.srcObject = null;
+    setPreviewReady(false); setStatus('Camera and microphone released');
+  };
   const toggle=(kind:'video'|'audio')=>{const enabled=kind==='video'?!camera:!mic;if(kind==='video')setCamera(enabled);else setMic(enabled);stream.current?.getTracks().filter(t=>t.kind===kind).forEach(t=>t.enabled=enabled);};
   const copy=async()=>{try{await navigator.clipboard.writeText(room.toUpperCase());setCopied(true);setTimeout(()=>setCopied(false),1400);}catch{setError('Copy unavailable. Select and copy the room code manually.');}};
   useEffect(()=>()=>{stream.current?.getTracks().forEach(t=>t.stop());socket.current?.close();peers.current.forEach(p=>p.pc.close());},[]);
@@ -59,15 +107,15 @@ export default function App() {
     <header className="topbar"><a className="brand" href="#"><span className="brand-icon">W</span>web<span className="accent">stream</span></a><span className="top-status"><i className={connected?'online':''}/>{connected?'Connected':'Studio ready'} <b>BETA</b></span></header>
     <section className="hero"><div><p className="eyebrow">BROWSER LIVE STUDIO</p><h1>Your stream.<br/><em>Your space.</em></h1><p className="subhead">Go live from your browser, with no downloads required.</p></div><span className="hero-tag">● &nbsp;Built for creators&nbsp; · &nbsp;WebRTC</span></section>
     <section className="workspace"><div className="preview-col"><div className="section-head"><h2><small>01</small> Studio preview</h2><span className={live?'live-tag on':'live-tag'}>● {live?'LIVE':'PREVIEW'}</span></div>
-      <div className="preview">{role==='host'?<video ref={localVideo} autoPlay muted playsInline/>:<video ref={remoteVideo} autoPlay playsInline/>}{!live&&<div className="empty"><div className="camera-icon">▣</div><strong>{role==='host'?'Your camera preview will appear here':'Waiting for the stream'}</strong><p>{role==='host'?'Allow camera and microphone access to get started.':'Join a room and video will appear when the host goes live.'}</p></div>}<span className="preview-label">● {live?'ON AIR':'LOCAL PREVIEW'}</span><span className="hd-label">HD · 16:9</span></div>
-      <div className="controls"><button disabled={!stream.current} onClick={()=>toggle('video')}>{camera?'▣ Camera on':'▣ Camera off'}</button><button disabled={!stream.current} onClick={()=>toggle('audio')}>{mic?'♫ Mic on':'♫ Mic muted'}</button><span className="grow"/>{connected&&<button className="end-btn" onClick={stop}>{role==='host'?'End stream':'Leave stream'}</button>}</div>
+      <div className="preview">{role==='host'?<video ref={localVideo} autoPlay muted playsInline/>:<video ref={remoteVideo} autoPlay playsInline/>}{!(live || previewReady)&&<div className="empty"><div className="camera-icon">▣</div><strong>{role==='host'?'Start camera preview to check your devices':'Waiting for the stream'}</strong><p>{role==='host'?'Your browser will ask for permission when you test your camera.':'Join a room and video will appear when the host goes live.'}</p></div>}<span className="preview-label">● {live?'ON AIR':'LOCAL PREVIEW'}</span><span className="hd-label">HD · 16:9</span></div>
+      <div className="controls"><button disabled={!previewReady} onClick={()=>toggle('video')}>{camera?'▣ Camera on':'▣ Camera off'}</button><button disabled={!previewReady} onClick={()=>toggle('audio')}>{mic?'♫ Mic on':'♫ Mic muted'}</button><span className="grow"/>{connected&&<button className="end-btn" onClick={stop}>{role==='host'?'End stream':'Leave stream'}</button>}</div>
       <p className="status-line"><i className={error?'error-dot':''}/>{error||status}</p>
     </div><aside className="setup"><div className="section-head"><h2><small>02</small> Set up your stream</h2></div>
       <div className="tabs"><button className={role==='host'?'selected':''} disabled={connected} onClick={()=>setRole('host')}>Host a stream</button><button className={role==='viewer'?'selected':''} disabled={connected} onClick={()=>setRole('viewer')}>Watch a stream</button></div>
       {role==='host'&&<><label htmlFor="title">Stream title</label><input id="title" value={title} maxLength={80} disabled={connected} onChange={e=>setTitle(e.target.value)} placeholder="What are you streaming?"/></>}
       <label htmlFor="room">{role==='host'?'Room code':'Enter room code'}</label><div className="room-row"><input id="room" value={room} maxLength={12} disabled={connected} onChange={e=>setRoom(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g,''))}/>{role==='host'&&<button className="copy" onClick={copy}>{copied?'Copied!':'Copy'}</button>}</div><p className="hint">{role==='host'?'Share this code privately with the people you want to watch.':'Ask the host for their room code.'}</p>
       <div className="rule"/><div className="info-row"><span>Viewers connected</span><strong>{viewers}</strong></div><div className="info-row"><span>Connection</span><strong className={connected?'green':''}>{connected?'Ready':'Not connected'}</strong></div>
-      <button className="primary" disabled={connected} onClick={role==='host'?startHost:joinViewer}>{role==='host'?'●　Start live stream':'↗　Join stream'} <span>→</span></button><p className="privacy">◇ Camera access is requested only when you start hosting.</p>
+      <>{role==='host'&&!previewReady&&<button className="outline-btn" disabled={busy} onClick={startPreview}>{busy?'Requesting access…':'Test camera & microphone'}</button>}<button className="primary" disabled={connected||busy} onClick={role==='host'?startHost:joinViewer}>{role==='host'?(busy?'Starting…':'●　Start live stream'):'↗　Join stream'} <span>→</span></button></>}<p className="privacy">◇ Camera and microphone are used only after you grant browser permission. Use HTTPS for deployed access.</p>
     </aside></section>
     <section className="destinations-section">
       <div className="destinations-heading"><div><p className="eyebrow">03 · DISTRIBUTION</p><h2>Stream to every platform</h2><p className="dest-copy">Plan your multistream setup from one studio. Platform connections require server-side OAuth configuration; custom RTMP targets need a secure media relay.</p></div><button className="outline-btn" onClick={()=>setShowDestinations(v=>!v)}>{showDestinations?'Hide settings':'Configure destinations'} <span>{showDestinations?'−':'+'}</span></button></div>
