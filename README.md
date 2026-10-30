@@ -46,3 +46,8 @@ MIT. See [LICENSE](LICENSE).
 ## RTMP / Facebook / YouTube / Twitch
 
 A browser cannot publish RTMP directly. To relay a real camera stream to Facebook Live, YouTube Live, Twitch, or another RTMP destination, deploy a WebRTC/WHIP media gateway and a server-side RTMP relay. See [the RTMP setup guide](docs/RTMP-SETUP.md). GitHub Pages alone cannot run the relay or securely store stream keys.
+
+
+## Run a gateway on your own PC
+
+You can run the media gateway only when you go live. See [Local MediaMTX gateway setup](docs/LOCAL-GATEWAY.md), including Docker Compose startup, the local WHIP endpoint, FFmpeg RTMP forwarding, and shutdown instructions. The supplied local configuration is for same-PC browser use; it is not an internet-facing production server.
