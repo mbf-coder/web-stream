@@ -1,7 +1,7 @@
 logLevel: info
 
 # WHIP ingest from the browser
-webrtc: yes
+webrtc: true
 webrtcAddress: :8889
 webrtcAllowOrigins:
   - '*'
