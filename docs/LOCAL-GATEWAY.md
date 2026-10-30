@@ -4,12 +4,32 @@ This setup runs the media gateway on your own PC only while you are live. The st
 
 ## Requirements
 
-- Docker Desktop (Windows/macOS) or Docker Engine + Compose (Linux)
+- Docker Desktop for Windows (with the Linux container engine enabled), or Docker Engine + Compose (Linux/macOS)
+- PowerShell 5.1 or later on Windows
 - A modern browser with camera/microphone permissions
 - FFmpeg installed on the PC for RTMP/RTMPS forwarding
 - A stable upload connection
 
 ## Start the gateway
+
+### Windows 11 (recommended)
+
+1. Install and start Docker Desktop for Windows. Wait until Docker Desktop reports that its engine is running.
+2. Open PowerShell in the cloned repository folder.
+3. If Windows blocks local scripts, run this once for the current PowerShell window only: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`.
+4. Start MediaMTX:
+
+```powershell
+.\\windows\\start-gateway.ps1
+```
+
+To inspect logs:
+
+```powershell
+docker compose -f docker-compose.local.yml logs -f mediamtx
+```
+
+### macOS / Linux
 
 From the repository folder:
 
@@ -31,7 +51,15 @@ Start the camera preview, then choose **Publish to gateway**. MediaMTX receives 
 
 Install FFmpeg on the same PC. Obtain the platform's RTMP ingest URL and stream key from its official live dashboard. Do not put the key in the GitHub repository, frontend, or a `VITE_*` variable.
 
-For a one-destination test, run this in a separate terminal, replacing the placeholders:
+On Windows 11, use the included helper. It asks for the full RTMP/RTMPS ingest URL as a secure PowerShell prompt and starts FFmpeg:
+
+```powershell
+.\\windows\\forward-to-platform.ps1
+```
+
+The helper transcodes browser WebRTC media to H.264/AAC because browser-negotiated VP8/Opus is not accepted by many RTMP ingest services. It runs until you press Ctrl+C. The URL is still passed to FFmpeg as a process argument while it runs, so only do this on a trusted PC and never share process listings or terminal logs containing credentials.
+
+For manual use on other operating systems, or a one-destination test, run this in a separate terminal, replacing the placeholders:
 
 ```bash
 ffmpeg -rtsp_transport tcp -i rtsp://127.0.0.1:8554/live -c:v copy -c:a copy -f flv "rtmps://PLATFORM-INGEST-URL/APP/STREAM_KEY"
@@ -44,6 +72,14 @@ Keep the command running while live. Close FFmpeg to stop forwarding. Treat the 
 1. In Web Stream, select **Stop gateway stream**.
 2. Stop the FFmpeg process.
 3. Stop MediaMTX:
+
+Windows PowerShell:
+
+```powershell
+.\\windows\\stop-gateway.ps1
+```
+
+macOS / Linux:
 
 ```bash
 docker compose -f docker-compose.local.yml down
