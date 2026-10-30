@@ -27,6 +27,7 @@ In another terminal run `npm run dev:server`. Open the Vite URL (usually http://
 ## Configuration
 Copy `.env.example` to `.env`:
 - `VITE_SIGNALING_URL`: optional WebSocket URL, e.g. `wss://your-domain.example/ws`.
+- `VITE_WHIP_ENDPOINT`: optional HTTPS WHIP publish URL, e.g. `https://media.example.com/live/whip` (must point to a configured gateway path).
 - `PORT`: signaling server port (default `8787`).
 
 Never put OAuth client secrets, access tokens, or long-lived stream keys in `VITE_*` variables or commit them.
