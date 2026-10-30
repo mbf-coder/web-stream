@@ -1,0 +1,15 @@
+logLevel: info
+
+# WHIP ingest from the browser
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigins:
+  - '*'
+webrtcLocalUDPAddress: :8189
+webrtcAdditionalHosts:
+  - localhost
+  - 127.0.0.1
+
+# RTSP output consumed by FFmpeg for RTMP forwarding
+rtsp: yes
+rtspAddress: :8554
