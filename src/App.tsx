@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { publishWhip, stopWhip, type WhipSession } from './whip';
 type Role = 'host' | 'viewer';
 type Peer = { pc: RTCPeerConnection; pending: RTCIceCandidateInit[] };
 const wsUrl = import.meta.env.VITE_SIGNALING_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8787/ws`;
@@ -8,7 +9,7 @@ export default function App() {
   const [role,setRole]=useState<Role>('host'); const [room,setRoom]=useState(roomCode); const [title,setTitle]=useState('My live stream');
   const [live,setLive]=useState(false); const [previewReady,setPreviewReady]=useState(false); const [busy,setBusy]=useState(false); const [connected,setConnected]=useState(false); const [camera,setCamera]=useState(true); const [mic,setMic]=useState(true);
   const [status,setStatus]=useState('Ready to set up your stream'); const [error,setError]=useState(''); const [viewers,setViewers]=useState(0); const [copied,setCopied]=useState(false);
-  const [showDestinations,setShowDestinations]=useState(false); const [rtmpName,setRtmpName]=useState('My RTMP destination'); const [rtmpUrl,setRtmpUrl]=useState(''); const [rtmpKey,setRtmpKey]=useState(''); const [destinations,setDestinations]=useState<string[]>([]); const [destinationNotice,setDestinationNotice]=useState('');
+  const [showDestinations,setShowDestinations]=useState(false); const [whipUrl,setWhipUrl]=useState(import.meta.env.VITE_WHIP_ENDPOINT || ''); const [gatewayState,setGatewayState]=useState('Not connected'); const [gatewayBusy,setGatewayBusy]=useState(false); const whipSession=useRef<WhipSession|null>(null); const [rtmpName,setRtmpName]=useState('My RTMP destination'); const [rtmpUrl,setRtmpUrl]=useState(''); const [rtmpKey,setRtmpKey]=useState(''); const [destinations,setDestinations]=useState<string[]>([]); const [destinationNotice,setDestinationNotice]=useState('');
   const localVideo=useRef<HTMLVideoElement>(null); const remoteVideo=useRef<HTMLVideoElement>(null); const stream=useRef<MediaStream|null>(null); const socket=useRef<WebSocket|null>(null);
   const peers=useRef(new Map<string,Peer>()); const selfId=useRef(''); const liveRef=useRef(false); const roleRef=useRef<Role>(role); roleRef.current=role;
   const send=(data:object)=>{if(socket.current?.readyState===WebSocket.OPEN)socket.current.send(JSON.stringify(data));};
@@ -114,8 +115,18 @@ export default function App() {
     finally { setBusy(false); }
   };
   const joinViewer=()=>{setError('');if(!room.trim()){setError('Enter a room code.');return;}connect('viewer',room.toUpperCase());};
+  const publishToGateway = async () => {
+    try { setError(''); setGatewayBusy(true); setGatewayState('Requesting camera…');
+      if (!stream.current) await startPreview();
+      if (!stream.current) throw new Error('Start the camera and microphone preview before publishing.');
+      if (!stream.current.getTracks().some(t => t.readyState === 'live' && t.enabled)) throw new Error('Enable at least one live camera or microphone track.');
+      setGatewayState('Connecting to WHIP gateway…'); whipSession.current = await publishWhip(whipUrl, stream.current); setGatewayState('Publishing to media gateway');
+    } catch (e) { setGatewayState('Connection failed'); setError(e instanceof Error ? e.message : 'Could not publish to the media gateway.'); }
+    finally { setGatewayBusy(false); }
+  };
+  const stopGateway = async () => { await stopWhip(whipSession.current); whipSession.current = null; setGatewayState('Not connected'); };
   const stop = () => {
-    send({ type: 'stream-ended' }); closePeers();
+    send({ type: 'stream-ended' }); closePeers(); void stopGateway();
     stream.current?.getTracks().forEach(t => t.stop()); stream.current = null;
     if (localVideo.current) localVideo.current.srcObject = null;
     if (remoteVideo.current) remoteVideo.current.srcObject = null;
@@ -131,7 +142,7 @@ export default function App() {
   };
   const toggle=(kind:'video'|'audio')=>{const enabled=kind==='video'?!camera:!mic;if(kind==='video')setCamera(enabled);else setMic(enabled);stream.current?.getTracks().filter(t=>t.kind===kind).forEach(t=>t.enabled=enabled);};
   const copy=async()=>{try{await navigator.clipboard.writeText(room.toUpperCase());setCopied(true);setTimeout(()=>setCopied(false),1400);}catch{setError('Copy unavailable. Select and copy the room code manually.');}};
-  useEffect(()=>()=>{stream.current?.getTracks().forEach(t=>t.stop());socket.current?.close();peers.current.forEach(p=>p.pc.close());},[]);
+  useEffect(()=>()=>{void stopWhip(whipSession.current);stream.current?.getTracks().forEach(t=>t.stop());socket.current?.close();peers.current.forEach(p=>p.pc.close());},[]);
   return <main className="shell">
     <header className="topbar"><a className="brand" href="#"><span className="brand-icon">W</span>web<span className="accent">stream</span></a><span className="top-status"><i className={connected?'online':''}/>{connected?'Connected':'Studio ready'} <b>BETA</b></span></header>
     <section className="hero"><div><p className="eyebrow">BROWSER LIVE STUDIO</p><h1>Your stream.<br/><em>Your space.</em></h1><p className="subhead">Go live from your browser, with no downloads required.</p></div><span className="hero-tag">● &nbsp;Built for creators&nbsp; · &nbsp;WebRTC</span></section>
@@ -155,6 +166,7 @@ export default function App() {
         <article className="platform-card"><span className="platform-logo twitch">▰</span><div><strong>Twitch</strong><small>Twitch account / RTMP</small></div><span className="platform-state">Setup needed</span><p>Use Twitch authorization or a stream key stored securely on the server.</p><button onClick={()=>setDestinationNotice('Twitch integration requires an approved Twitch application or a securely managed RTMP stream key.')}>Connect account ↗</button></article>
         <article className="platform-card"><span className="platform-logo multi">＋</span><div><strong>Other platforms</strong><small>TikTok · Kick · Custom RTMP</small></div><span className="platform-state">Flexible</span><p>Add any service that provides a compatible RTMP/RTMPS ingest endpoint.</p><button onClick={()=>setShowDestinations(v=>!v)}>Set up RTMP ↗</button></article>
       </div>
+      <div className="rtmp-panel gateway-panel"><div><h3>Live media gateway (WHIP)</h3><p>Publish your browser camera and microphone to a real WebRTC/WHIP ingest endpoint. Configure RTMP/RTMPS destinations on the gateway server; stream keys are never entered here.</p></div><label className="gateway-label">WHIP publish endpoint<input value={whipUrl} onChange={e=>setWhipUrl(e.target.value)} placeholder="https://media.example.com/live/whip" autoComplete="url" disabled={gatewayState==='Publishing to media gateway'}/></label><div className="gateway-actions"><span className={gatewayState==='Publishing to media gateway'?'gateway-online':''}>● {gatewayState}</span>{gatewayState==='Publishing to media gateway'?<button className="end-btn" onClick={stopGateway}>Stop gateway stream</button>:<button className="primary gateway-button" disabled={gatewayBusy||!whipUrl.trim()} onClick={publishToGateway}>{gatewayBusy?'Connecting…':'Publish to gateway →'}</button>}</div><p className="gateway-help">Requires a public HTTPS WHIP endpoint with browser CORS enabled. Configure the WHIP path on your gateway and relay that path to each RTMP destination.</p></div>
       {showDestinations&&<div className="rtmp-panel"><div><h3>Custom RTMP destination</h3><p>These fields are a UI prototype only. The current MVP does not store credentials or relay media to external platforms yet.</p></div><div className="rtmp-fields"><label>Destination name<input value={rtmpName} onChange={e=>setRtmpName(e.target.value)} placeholder="e.g. Kick main channel"/></label><label>RTMP / RTMPS server URL<input value={rtmpUrl} onChange={e=>setRtmpUrl(e.target.value)} placeholder="rtmps://live.example.com/app" autoComplete="off"/></label><label>Stream key<input type="password" value={rtmpKey} onChange={e=>setRtmpKey(e.target.value)} placeholder="Enter only in a secured backend flow" autoComplete="new-password"/></label></div><button className="primary rtmp-save" onClick={()=>{setDestinationNotice('Prototype only: nothing was saved or transmitted. To enable this, configure an authenticated backend and media relay first.');setRtmpKey('');}}>Validate setup <span>→</span></button>{destinations.length>0&&<p className="field-saved">Configured in this session: {destinations.join(', ')}</p>}</div>}
       {destinationNotice&&<p className="destination-notice" role="status">{destinationNotice}<button onClick={()=>setDestinationNotice('')} aria-label="Dismiss notice">×</button></p>}
       <p className="security-note">🔒 Never put OAuth client secrets or long-lived stream keys in frontend code, GitHub Pages, or committed <code>.env</code> files.</p>
